@@ -1,0 +1,121 @@
+﻿// Compute shader implementation of Gaussian blur by Olli S.
+
+#pragma kernel K_Horizontal
+#pragma kernel K_Vertical
+
+
+Texture2D<float4>   SourceTexture;
+RWTexture2D<float4> HorizResultTexture;
+RWTexture2D<float4> ResultTexture;
+
+
+#define THREADS_X 256
+#define THREADS_Y 256
+#define MAX_SAMPLES 64
+
+#define PI2 6.28319
+#define E 2.71828
+
+
+uniform int _Samples;
+uniform float _Spread;
+
+
+groupshared float4 samples[THREADS_X + 2 * MAX_SAMPLES];
+
+
+float Gaussian(float offset)
+{
+    float sigmaSquared = _Spread * _Spread;
+    return (1 / sqrt(PI2 * sigmaSquared)) * pow(E, -(offset * offset) / (2 * sigmaSquared));
+}
+
+
+[numthreads(THREADS_X, 1, 1)]
+void K_Horizontal (int3 DispatchThreadID : SV_DispatchThreadID,
+                   int3 GroupThreadID    : SV_GroupThreadID)
+{
+    if (_Samples < 1)
+        return;
+
+    float xDim, yDim;
+    SourceTexture.GetDimensions(xDim, yDim);
+    float2 dimXY = float2(xDim, yDim);
+
+    samples[GroupThreadID.x + _Samples] = SourceTexture[DispatchThreadID.xy];
+
+    int2 offset = int2(_Samples, 0);
+
+    if (GroupThreadID.x < _Samples)
+    {
+        int2 idx = clamp(DispatchThreadID.xy - offset, 0, float2(dimXY.x - 1, dimXY.y));
+        samples[GroupThreadID.x] = SourceTexture[idx];
+    }
+    else if (GroupThreadID.x >= THREADS_X - _Samples)
+    {
+        int2 idx = clamp(DispatchThreadID.xy + offset, 0, float2(dimXY.x - 1, dimXY.y));
+        samples[GroupThreadID.x + 2 * _Samples] = SourceTexture[idx];
+    }
+
+    GroupMemoryBarrierWithGroupSync();
+
+    float kernelSum = 0;
+    float4 result = 0;
+
+    [loop]
+    for (int i = -_Samples; i <= _Samples; i++)
+    {
+        float g = Gaussian(i);
+        kernelSum += g;
+        result += g * samples[GroupThreadID.x + i + _Samples];
+    }
+
+    result /= kernelSum;
+
+    HorizResultTexture[DispatchThreadID.xy] = result;
+}
+
+
+[numthreads(1, THREADS_Y, 1)]
+void K_Vertical (int3 DispatchThreadID : SV_DispatchThreadID,
+                 int3 GroupThreadID    : SV_GroupThreadID)
+{
+    if (_Samples < 1)
+        return;
+
+    float xDim, yDim;
+    HorizResultTexture.GetDimensions(xDim, yDim);
+    float2 dimXY = float2(xDim, yDim);
+
+    samples[GroupThreadID.y + _Samples] = HorizResultTexture[DispatchThreadID.xy];
+
+    int2 offset = int2(0, _Samples);
+
+    if (GroupThreadID.y < _Samples)
+    {
+        int2 idx = clamp(DispatchThreadID.xy - offset, 0, float2(dimXY.x, dimXY.y - 1));
+        samples[GroupThreadID.y] = HorizResultTexture[idx];
+    }
+    else if (GroupThreadID.y >= THREADS_Y - _Samples)
+    {
+        int2 idx = clamp(DispatchThreadID.xy + offset, 0, float2(dimXY.x, dimXY.y - 1));
+        samples[GroupThreadID.y + 2 * _Samples] = HorizResultTexture[idx];
+    }
+
+    GroupMemoryBarrierWithGroupSync();
+
+    float kernelSum = 0;
+    float4 result = 0;
+
+    [loop]
+    for (int i = -_Samples; i <= _Samples; i++)
+    {
+        float g = Gaussian(i);
+        kernelSum += g;
+        result += g * samples[GroupThreadID.y + i + _Samples];
+    }
+
+    result /= kernelSum;
+
+    ResultTexture[DispatchThreadID.xy] = result;
+}
