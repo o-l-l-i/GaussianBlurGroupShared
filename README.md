@@ -21,3 +21,5 @@ Using groupshared memory requires some thinking and makes it a bit tricker to im
 
 - Built in Unity 2018.4, most likely works on later versions
 - This implementation assumes a square image
+
+© 2020 Olli Sorjonen All Rights Reserved
